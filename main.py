@@ -15,11 +15,11 @@ class App(tk.Tk):
         tk.Tk.__init__(self)
 
         self.closing = False
-        # self.commands = ['выше', 'ниже', 'смени язык', 'нажать', 'стереть', 'стереть все', 'включи клавиатуру']
         self.commands = {
-            'focus_up': True, 'focus_down': True, 'change_lang': True, 'invoke': True,
-            'delete_word': True, 'delete_entry': True, 'keyboard_on': True, 'keyboard_off': False
+            'focus_up': True, 'focus_down': True, 'focus_left': False, 'focus_right': False, 'change_lang': True,
+            'invoke': True, 'delete_word': True, 'delete_entry': True, 'keyboard_on': True, 'keyboard_off': False
         }
+        self.resizable(False, False)
 
         self.tkvars = {
             'listen': tk.StringVar(),
@@ -32,8 +32,8 @@ class App(tk.Tk):
         stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
         stream.start_stream()
 
-        listening_thread = Thread(target=self.listen, args=(stream, rec_en, rec_ru))
-        listening_thread.start()
+        self.listening_thread = Thread(target=self.listen, args=(stream, rec_en, rec_ru))
+        self.listening_thread.start()
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -54,7 +54,7 @@ class App(tk.Tk):
     def listen(self, stream, rec_en, rec_ru):
         while True:
             if self.closing:
-                return
+                sys.exit()
             data = stream.read(4000, exception_on_overflow=False)
             if (rec_en.AcceptWaveform(data) or rec_ru.AcceptWaveform(data)) and len(data) > 0:
                 answer_en = json.loads(rec_en.Result())['text']
@@ -65,11 +65,15 @@ class App(tk.Tk):
                     self.handler(answer)
 
     def handler(self, listened_text):
-        if listened_text['RU'] in st.COMMANDS_MEANING.values():
+        if listened_text['RU'] in self.get_command_words():
             if listened_text['RU'] == st.COMMANDS_MEANING['focus_up']:
                 self.change_focus(container=self._frame, focus='up')
             elif listened_text['RU'] == st.COMMANDS_MEANING['focus_down']:
                 self.change_focus(container=self._frame, focus='down')
+            elif listened_text['RU'] == st.COMMANDS_MEANING['focus_left']:
+                self.change_focus(container=self._frame, focus='left')
+            elif listened_text['RU'] == st.COMMANDS_MEANING['focus_right']:
+                self.change_focus(container=self._frame, focus='right')
             elif listened_text['RU'] == st.COMMANDS_MEANING['change_lang']:
                 st.LANGUAGE = 'RU' if st.LANGUAGE == 'EN' else 'EN'
             elif listened_text['RU'] == st.COMMANDS_MEANING['invoke']:
@@ -89,96 +93,56 @@ class App(tk.Tk):
             elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_on']:
                 self.commands['keyboard_on'] = False
                 self.commands['keyboard_off'] = True
+                self.commands['focus_left'] = True
+                self.commands['focus_right'] = True
                 self._frame.keyboard.set(True)
             elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_off']:
                 self.commands['keyboard_on'] = True
                 self.commands['keyboard_off'] = False
+                self.commands['focus_left'] = False
+                self.commands['focus_right'] = False
                 self._frame.keyboard.set(False)
 
         # updating labels
         self.tkvars['commands'].set(self.get_command_words())
         self.tkvars['language'].set(st.LANGUAGE)
 
+    def set_focus(self, container, row_ch: tuple, col_ch: tuple):
+        max_columns, max_rows = container.grid_size()
+        focusable_classes = ['TEntry', 'TButton']
+        row = container.focus_get().grid_info()['row']
+        column = container.focus_get().grid_info()['column']
+        obj = container.grid_slaves(
+            (row + row_ch[0] + max_rows) % max_rows,
+            (column + col_ch[0] + max_columns) % max_columns)
+        if obj and obj[0].winfo_class() in focusable_classes:
+            obj[0].focus_set()
+        else:
+            obj = container.grid_slaves(
+                (row + row_ch[1] + max_rows) % max_rows,
+                (column + col_ch[1] + max_columns) % max_columns)
+            if obj and obj[0].winfo_class() in focusable_classes:
+                obj[0].focus_set()
+            else:
+                obj = container.grid_slaves(
+                    (row + row_ch[2] + max_rows) % max_rows,
+                    (column + col_ch[2] + max_columns) % max_columns)
+                if obj and obj[0].winfo_class() in focusable_classes:
+                    obj[0].focus_set()
+
     def change_focus(self, container, focus):
         if hasattr(container, 'keyboard') and container.keyboard.get():
             container = container.keyboard_frame
-        focusable_classes = ['TEntry', 'TButton']
-        max_rows = container.grid_size()[1]
-        max_columns = container.grid_size()[0]
-        row = container.focus_get().grid_info()['row']
-        column = container.focus_get().grid_info()['column']
+        dy = container.focus_get().grid_info()['rowspan']
+        dx = container.focus_get().grid_info()['columnspan']
         if focus == 'up':
-            obj = container.grid_slaves(
-                (row - 1 + max_rows) % max_rows,
-                column + max_columns % max_columns)[0]
-            if obj.winfo_class() in focusable_classes:
-                obj.focus_set()
-            else:
-                obj = container.grid_slaves(
-                    (row - 1 + max_rows) % max_rows,
-                    (column + max_columns + 1) % max_columns)[0]
-                if obj.winfo_class() in focusable_classes:
-                    obj.focus_set()
-                else:
-                    obj = container.grid_slaves(
-                        (row - 1 + max_rows) % max_rows,
-                        (column + max_columns - 1) % max_columns)[0]
-                    if obj.winfo_class() in focusable_classes:
-                        obj.focus_set()
+            self.set_focus(container, (-dy, -dy, -dy), (0, dx, -dx))
         elif focus == 'down':
-            obj = container.grid_slaves(
-                (row + 1 + max_rows) % max_rows,
-                (column + max_columns) % max_columns)[0]
-            if obj.winfo_class() in focusable_classes:
-                obj.focus_set()
-            else:
-                obj = container.grid_slaves(
-                    (row + 1 + max_rows) % max_rows,
-                    (column + max_columns + 1) % max_columns)[0]
-                if obj.winfo_class() in focusable_classes:
-                    obj.focus_set()
-                else:
-                    obj = container.grid_slaves(
-                        (row + 1 + max_rows) % max_rows,
-                        (column + max_columns - 1) % max_columns)[0]
-                    if obj.winfo_class() in focusable_classes:
-                        obj.focus_set()
+            self.set_focus(container, (dy, dy, dy), (0, dx, -dx))
         elif focus == 'left':
-            obj = container.grid_slaves(
-                (row + max_rows) % max_rows,
-                (column + max_columns - 1) % max_columns)[0]
-            if obj.winfo_class() in focusable_classes:
-                obj.focus_set()
-            else:
-                obj = container.grid_slaves(
-                    (row + max_rows + 1) % max_rows,
-                    (column + max_columns - 1) % max_columns)[0]
-                if obj.winfo_class() in focusable_classes:
-                    obj.focus_set()
-                else:
-                    obj = container.grid_slaves(
-                        (row + max_rows - 1) % max_rows,
-                        (column + max_columns - 1) % max_columns)[0]
-                    if obj.winfo_class() in focusable_classes:
-                        obj.focus_set()
+            self.set_focus(container, (0, dy, -dy), (-dx, -dx, -dx))
         elif focus == 'right':
-            obj = container.grid_slaves(
-                (row + max_rows) % max_rows,
-                (column + max_columns + 1) % max_columns)[0]
-            if obj.winfo_class() in focusable_classes:
-                obj.focus_set()
-            else:
-                obj = container.grid_slaves(
-                    (row + max_rows + 1) % max_rows,
-                    (column + max_columns + 1) % max_columns)[0]
-                if obj.winfo_class() in focusable_classes:
-                    obj.focus_set()
-                else:
-                    obj = container.grid_slaves(
-                        (row + max_rows - 1) % max_rows,
-                        (column + max_columns + 1) % max_columns)[0]
-                    if obj.winfo_class() in focusable_classes:
-                        obj.focus_set()
+            self.set_focus(container, (0, dy, -dy), (dx, dx, dx))
 
     def on_closing(self):
         self.closing = True
@@ -195,6 +159,7 @@ class ConnectMenu(tk.Frame):
         self.keyboard = tk.BooleanVar(value=False)
         self.keyboard_frame = None
         self.focused_entry = None
+        self.caps_lock = False
 
         self.window_width = 500
         self.window_height = 250
@@ -269,6 +234,74 @@ class ConnectMenu(tk.Frame):
         # self.root.switch_frame(ConnectionWindow)
         self.keyboard.set(not self.keyboard.get())
 
+    def key_handler(self, key_text):
+        print(key_text)
+
+    def init_buttons(self):
+        for column in range(13):
+            self.keyboard_frame.columnconfigure(index=column, weight=1)
+        for row in range(5):
+            self.keyboard_frame.rowconfigure(index=row, weight=1)
+
+        ttk.Button(self.keyboard_frame, text='~`Ё', command=lambda: self.key_handler('~`Ё')).grid(row=0, column=0)
+        ttk.Button(self.keyboard_frame, text='!1', ).grid(row=0, column=1)
+        ttk.Button(self.keyboard_frame, text='"@', ).grid(row=0, column=2)
+        ttk.Button(self.keyboard_frame, text='№#', ).grid(row=0, column=3)
+        ttk.Button(self.keyboard_frame, text=';$', ).grid(row=0, column=4)
+        ttk.Button(self.keyboard_frame, text='%5', ).grid(row=0, column=5)
+        ttk.Button(self.keyboard_frame, text=':^', ).grid(row=0, column=6)
+        ttk.Button(self.keyboard_frame, text='?&', ).grid(row=0, column=7)
+        ttk.Button(self.keyboard_frame, text='*8', ).grid(row=0, column=8)
+        ttk.Button(self.keyboard_frame, text='(9', ).grid(row=0, column=9)
+        ttk.Button(self.keyboard_frame, text=')0', ).grid(row=0, column=10)
+        ttk.Button(self.keyboard_frame, text='_-', ).grid(row=0, column=11)
+        ttk.Button(self.keyboard_frame, text='+=', ).grid(row=0, column=12)
+        ttk.Button(self.keyboard_frame, text='Backspace', ).grid(row=0, column=13)
+
+        ttk.Label(self.keyboard_frame, text='OFF', ).grid(row=1, column=0)
+
+        ttk.Button(self.keyboard_frame, text='Qй', ).grid(row=1, column=1)
+        ttk.Button(self.keyboard_frame, text='Wц', ).grid(row=1, column=2)
+        ttk.Button(self.keyboard_frame, text='Eу', ).grid(row=1, column=3)
+        ttk.Button(self.keyboard_frame, text='Rк', ).grid(row=1, column=4)
+        ttk.Button(self.keyboard_frame, text='Tе', ).grid(row=1, column=5)
+        ttk.Button(self.keyboard_frame, text='Yн', ).grid(row=1, column=6)
+        ttk.Button(self.keyboard_frame, text='Uг', ).grid(row=1, column=7)
+        ttk.Button(self.keyboard_frame, text='Iш', ).grid(row=1, column=8)
+        ttk.Button(self.keyboard_frame, text='Oщ', ).grid(row=1, column=9)
+        ttk.Button(self.keyboard_frame, text='Pз', ).grid(row=1, column=10)
+        ttk.Button(self.keyboard_frame, text='{[х', ).grid(row=1, column=11)
+        ttk.Button(self.keyboard_frame, text='}]ъ', ).grid(row=1, column=12)
+        ttk.Button(self.keyboard_frame, text='|\\/', ).grid(row=1, column=13)
+
+        ttk.Button(self.keyboard_frame, text='Caps Lock', ).grid(row=2, column=0, columnspan=2)
+        ttk.Button(self.keyboard_frame, text='Aф', ).grid(row=2, column=2)
+        ttk.Button(self.keyboard_frame, text='Sы', ).grid(row=2, column=3)
+        ttk.Button(self.keyboard_frame, text='Dв', ).grid(row=2, column=4)
+        ttk.Button(self.keyboard_frame, text='Fа', ).grid(row=2, column=5)
+        ttk.Button(self.keyboard_frame, text='Gп', ).grid(row=2, column=6)
+        ttk.Button(self.keyboard_frame, text='Hр', ).grid(row=2, column=7)
+        ttk.Button(self.keyboard_frame, text='Jо', ).grid(row=2, column=8)
+        ttk.Button(self.keyboard_frame, text='Kл', ).grid(row=2, column=9)
+        ttk.Button(self.keyboard_frame, text='Lд', ).grid(row=2, column=10)
+        ttk.Button(self.keyboard_frame, text='Ж:;', ).grid(row=2, column=11)
+        ttk.Button(self.keyboard_frame, text='Э"\'', ).grid(row=2, column=12)
+
+        ttk.Button(self.keyboard_frame, text='Shift', ).grid(row=3, column=0, columnspan=2)
+        ttk.Button(self.keyboard_frame, text='Zя', ).grid(row=3, column=2)
+        ttk.Button(self.keyboard_frame, text='Xч', ).grid(row=3, column=3)
+        ttk.Button(self.keyboard_frame, text='Сc', ).grid(row=3, column=4)
+        ttk.Button(self.keyboard_frame, text='Vм', ).grid(row=3, column=5)
+        ttk.Button(self.keyboard_frame, text='Bи', ).grid(row=3, column=6)
+        ttk.Button(self.keyboard_frame, text='Nт', ).grid(row=3, column=7)
+        ttk.Button(self.keyboard_frame, text='Mь', ).grid(row=3, column=8)
+        ttk.Button(self.keyboard_frame, text='Б<,', ).grid(row=3, column=9)
+        ttk.Button(self.keyboard_frame, text='Ю>.', ).grid(row=3, column=10)
+        ttk.Button(self.keyboard_frame, text='?/', ).grid(row=3, column=11)
+        ttk.Button(self.keyboard_frame, text=',.', ).grid(row=3, column=12)
+
+        ttk.Button(self.keyboard_frame, text='Space', ).grid(row=4, column=4, columnspan=6, sticky='we')
+
     def on_keyboard(self):
         if self.keyboard.get():
             self.focused_entry = self.focus_get()
@@ -276,13 +309,10 @@ class ConnectMenu(tk.Frame):
             for widget in self.winfo_children():
                 if widget.winfo_class() == 'TEntry' and widget is not self.focused_entry:
                     widget['state'] = 'disabled'
-            self.keyboard_frame = ttk.Frame(self, borderwidth=1, relief='groove')
+            self.keyboard_frame = ttk.Frame(self, borderwidth=1, relief='groove', )
             self.keyboard_frame.grid(row=self.grid_size()[1], column=0, columnspan=self.grid_size()[0], sticky='we')
 
-            ttk.Button(self.keyboard_frame, text='test', command=lambda: self.focused_entry.insert(0, 'test')).grid()
-            ttk.Button(self.keyboard_frame, text='test').grid()
-            ttk.Button(self.keyboard_frame, text='test').grid()
-            ttk.Button(self.keyboard_frame, text='test').grid()
+            self.init_buttons()
 
             self.keyboard_frame.update()
             self.root.geometry(f'{self.window_width}x{self.window_height + self.keyboard_frame.winfo_height()}+'
