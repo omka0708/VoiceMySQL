@@ -1,4 +1,5 @@
 import sys
+import time
 import tkinter as tk
 from tkinter import ttk
 from PIL import ImageTk, Image
@@ -26,6 +27,11 @@ class App(tk.Tk):
             'commands': tk.StringVar(value=self.get_command_words()),
             'language': tk.StringVar(value=st.LANGUAGE)}
 
+        self.keyboard = tk.BooleanVar(value=False)
+        self.keyboard_frame = None
+        self.focused_entry = None
+        self.caps_lock = False
+
         model_en, model_ru = Model('small_model_en_us'), Model('small_model_ru')
         rec_en, rec_ru = KaldiRecognizer(model_en, 16000), KaldiRecognizer(model_ru, 16000)
         p = pyaudio.PyAudio()
@@ -36,6 +42,7 @@ class App(tk.Tk):
         self.listening_thread.start()
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.keyboard.trace_add('write', lambda *args: self.on_keyboard())
 
         self._frame = None
         self.switch_frame(ConnectMenu)
@@ -90,18 +97,18 @@ class App(tk.Tk):
                     text = ' '.join(obj.get().split()[:-1])
                     obj.delete(0, tk.END)
                     obj.insert(0, text)
-            elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_on']:
+            elif listened_text['RU'] == st.COMMANDS_MEANING['keyboard_on']:
                 self.commands['keyboard_on'] = False
                 self.commands['keyboard_off'] = True
                 self.commands['focus_left'] = True
                 self.commands['focus_right'] = True
-                self._frame.keyboard.set(True)
-            elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_off']:
+                self.keyboard.set(True)
+            elif listened_text['RU'] == st.COMMANDS_MEANING['keyboard_off']:
                 self.commands['keyboard_on'] = True
                 self.commands['keyboard_off'] = False
                 self.commands['focus_left'] = False
                 self.commands['focus_right'] = False
-                self._frame.keyboard.set(False)
+                self.keyboard.set(False)
 
         # updating labels
         self.tkvars['commands'].set(self.get_command_words())
@@ -131,8 +138,8 @@ class App(tk.Tk):
                     obj[0].focus_set()
 
     def change_focus(self, container, focus):
-        if hasattr(container, 'keyboard') and container.keyboard.get():
-            container = container.keyboard_frame
+        if self.keyboard.get():
+            container = self.keyboard_frame
         dy = container.focus_get().grid_info()['rowspan']
         dx = container.focus_get().grid_info()['columnspan']
         if focus == 'up':
@@ -147,92 +154,6 @@ class App(tk.Tk):
     def on_closing(self):
         self.closing = True
         sys.exit()
-
-
-class ConnectMenu(tk.Frame):
-
-    def __init__(self, root):
-        tk.Frame.__init__(self, root)
-        self.root = root
-        root.title("VoiceMySQL")
-
-        self.keyboard = tk.BooleanVar(value=False)
-        self.keyboard_frame = None
-        self.focused_entry = None
-        self.caps_lock = False
-
-        self.window_width = 500
-        self.window_height = 250
-        self.screen_width = root.winfo_screenwidth()
-        self.screen_height = root.winfo_screenheight()
-
-        self.center_x = int(self.screen_width / 2 - self.window_width / 2)
-        self.center_y = int(self.screen_height / 2 - self.window_height / 2 - 50)
-
-        root.geometry(f'{self.window_width}x{self.window_height}+{self.center_x}+{self.center_y}')
-
-        for c in range(3):
-            self.columnconfigure(index=c, weight=1)
-        for r in range(6):
-            self.rowconfigure(index=r, weight=1)
-
-        self.img = ImageTk.PhotoImage(Image.open("micro.png"))
-
-        label_mic = ttk.Label(self, image=self.img)
-        label_mic.grid(row=0, column=0)
-
-        label_listening = ttk.Label(self, textvariable=root.tkvars['listen'], borderwidth=2, relief='groove', padding=5,
-                                    width=20, anchor=tk.CENTER, background='white')
-        label_listening.grid(row=0, column=1)
-
-        label_txt_commands = ttk.Label(self, text='commands:')
-        label_txt_commands.grid(row=0, column=2)
-
-        label_commands = ttk.Label(self, textvariable=root.tkvars['commands'], borderwidth=2, relief='groove',
-                                   padding=5,
-                                   width=20, background='white', foreground='red',
-                                   justify=tk.CENTER, anchor=tk.CENTER)
-
-        label_commands.grid(row=1, column=2, rowspan=4, sticky='ns', padx=10)
-
-        label_host = ttk.Label(self, text='host:')
-        label_host.grid(row=1, column=0)
-        entry_host = ttk.Entry(self)
-        entry_host.grid(row=1, column=1)
-        entry_host.focus_set()
-
-        label_user = ttk.Label(self, text='user:')
-        label_user.grid(row=2, column=0)
-        entry_user = ttk.Entry(self)
-        entry_user.grid(row=2, column=1)
-
-        label_port = ttk.Label(self, text='port:')
-        label_port.grid(row=3, column=0)
-        entry_port = ttk.Entry(self)
-        entry_port.grid(row=3, column=1)
-
-        label_password = ttk.Label(self, text='password:')
-        label_password.grid(row=4, column=0, ipadx=10)
-        entry_password = ttk.Entry(self)
-        entry_password.grid(row=4, column=1)
-
-        button_connect = ttk.Button(self, text='Connect', command=self.connect)
-        button_connect.grid(row=5, column=0, columnspan=2)
-
-        label_listening_lang = ttk.Label(self, textvariable=root.tkvars['language'], text=st.LANGUAGE)
-        label_listening_lang.grid(row=5, column=2)
-
-        self.keyboard.trace_add('write', lambda *args: self.on_keyboard())
-
-        root.bind("<Return>", lambda e: self.connect())
-        root.bind("<Up>", lambda e: root.change_focus(self, 'up'))
-        root.bind("<Down>", lambda e: root.change_focus(self, 'down'))
-        root.bind("<Left>", lambda e: root.change_focus(self, 'left'))
-        root.bind("<Right>", lambda e: root.change_focus(self, 'right'))
-
-    def connect(self):
-        # self.root.switch_frame(ConnectionWindow)
-        self.keyboard.set(not self.keyboard.get())
 
     def key_handler(self, key_text):
         print(key_text)
@@ -304,30 +225,109 @@ class ConnectMenu(tk.Frame):
 
     def on_keyboard(self):
         if self.keyboard.get():
-            self.focused_entry = self.focus_get()
-            self.focused_entry.configure(takefocus=0)
-            for widget in self.winfo_children():
-                if widget.winfo_class() == 'TEntry' and widget is not self.focused_entry:
+            self._frame.focused_entry = self._frame.focus_get()
+            self._frame.focused_entry.configure(takefocus=0)
+            for widget in self._frame.winfo_children():
+                if widget.winfo_class() == 'TEntry' and widget is not self._frame.focused_entry:
                     widget['state'] = 'disabled'
-            self.keyboard_frame = ttk.Frame(self, borderwidth=1, relief='groove', )
-            self.keyboard_frame.grid(row=self.grid_size()[1], column=0, columnspan=self.grid_size()[0], sticky='we')
+            self.keyboard_frame = ttk.Frame(self._frame, borderwidth=1, relief='groove', )
+            self.keyboard_frame.grid(row=self._frame.grid_size()[1], column=0,
+                                     columnspan=self._frame.grid_size()[0], sticky='we')
 
             self.init_buttons()
 
             self.keyboard_frame.update()
-            self.root.geometry(f'{self.window_width}x{self.window_height + self.keyboard_frame.winfo_height()}+'
-                               f'{self.center_x}+{self.center_y}')
+            self._frame.root.geometry(f'{self._frame.window_width}x'
+                                      f'{self._frame.window_height + self.keyboard_frame.winfo_height()}+'
+                                      f'{self._frame.center_x}+{self._frame.center_y}')
 
             self.keyboard_frame.grid_slaves()[-1].focus_set()
 
         else:
-            for widget in self.winfo_children():
+            for widget in self._frame.winfo_children():
                 if widget.winfo_class() == 'TEntry':
                     widget['state'] = 'enabled'
             self.keyboard_frame.grid_remove()
-            self.root.geometry(f'{self.window_width}x{self.window_height}+'
-                               f'{self.center_x}+{self.center_y}')
-            self.focused_entry.focus_set()
+            self.geometry(f'{self._frame.window_width}x{self._frame.window_height}+'
+                          f'{self._frame.center_x}+{self._frame.center_y}')
+            self._frame.focused_entry.focus_set()
+
+
+class ConnectMenu(tk.Frame):
+    def __init__(self, root):
+        tk.Frame.__init__(self, root)
+        self.root = root
+        root.title("VoiceMySQL")
+
+        self.window_width = 500
+        self.window_height = 250
+        self.screen_width = root.winfo_screenwidth()
+        self.screen_height = root.winfo_screenheight()
+
+        self.center_x = int(self.screen_width / 2 - self.window_width / 2)
+        self.center_y = int(self.screen_height / 2 - self.window_height / 2 - 50)
+
+        root.geometry(f'{self.window_width}x{self.window_height}+{self.center_x}+{self.center_y}')
+
+        for c in range(3):
+            self.columnconfigure(index=c, weight=1)
+        for r in range(6):
+            self.rowconfigure(index=r, weight=1)
+
+        self.img = ImageTk.PhotoImage(Image.open("micro.png"))
+
+        label_mic = ttk.Label(self, image=self.img)
+        label_mic.grid(row=0, column=0)
+
+        label_listening = ttk.Label(self, textvariable=root.tkvars['listen'], borderwidth=2, relief='groove', padding=5,
+                                    width=20, anchor=tk.CENTER, background='white')
+        label_listening.grid(row=0, column=1)
+
+        label_txt_commands = ttk.Label(self, text='commands:')
+        label_txt_commands.grid(row=0, column=2)
+
+        label_commands = ttk.Label(self, textvariable=root.tkvars['commands'], borderwidth=2, relief='groove',
+                                   padding=5,
+                                   width=20, background='white', foreground='red',
+                                   justify=tk.CENTER, anchor=tk.CENTER)
+
+        label_commands.grid(row=1, column=2, rowspan=4, sticky='ns', padx=10)
+
+        label_host = ttk.Label(self, text='host:')
+        label_host.grid(row=1, column=0)
+        entry_host = ttk.Entry(self)
+        entry_host.grid(row=1, column=1)
+        entry_host.focus_set()
+
+        label_user = ttk.Label(self, text='user:')
+        label_user.grid(row=2, column=0)
+        entry_user = ttk.Entry(self)
+        entry_user.grid(row=2, column=1)
+
+        label_port = ttk.Label(self, text='port:')
+        label_port.grid(row=3, column=0)
+        entry_port = ttk.Entry(self)
+        entry_port.grid(row=3, column=1)
+
+        label_password = ttk.Label(self, text='password:')
+        label_password.grid(row=4, column=0, ipadx=10)
+        entry_password = ttk.Entry(self)
+        entry_password.grid(row=4, column=1)
+
+        button_connect = ttk.Button(self, text='Connect', command=self.connect)
+        button_connect.grid(row=5, column=0, columnspan=2)
+
+        label_listening_lang = ttk.Label(self, textvariable=root.tkvars['language'], text=st.LANGUAGE)
+        label_listening_lang.grid(row=5, column=2)
+
+        root.bind("<Return>", lambda e: self.connect())
+        root.bind("<Up>", lambda e: root.change_focus(self, 'up'))
+        root.bind("<Down>", lambda e: root.change_focus(self, 'down'))
+        root.bind("<Left>", lambda e: root.change_focus(self, 'left'))
+        root.bind("<Right>", lambda e: root.change_focus(self, 'right'))
+
+    def connect(self):
+        self.root.switch_frame(ConnectionWindow)
 
 
 class ConnectionWindow(tk.Frame):
