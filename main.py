@@ -1,5 +1,4 @@
 import sys
-import time
 import tkinter as tk
 from tkinter import ttk
 from PIL import ImageTk, Image
@@ -19,7 +18,8 @@ class App(tk.Tk):
         self.closing = False
         self.commands = {
             'focus_up': True, 'focus_down': True, 'focus_left': False, 'focus_right': False, 'change_lang': True,
-            'invoke': True, 'delete_word': True, 'delete_entry': True, 'keyboard_on': True, 'keyboard_off': False
+            'invoke': True, 'delete_symbol': True, 'delete_word': True, 'delete_entry': True, 'keyboard_on': True,
+            'keyboard_off': False,
         }
         self.resizable(False, False)
 
@@ -67,50 +67,62 @@ class App(tk.Tk):
                     self.handler(answer)
 
     def handler(self, listened_text):
-        if listened_text['RU'] in self.get_command_words():
-            if listened_text['RU'] == st.COMMANDS_MEANING['focus_up']:
-                self.change_focus(container=self._frame, focus='up')
-            elif listened_text['RU'] == st.COMMANDS_MEANING['focus_down']:
-                self.change_focus(container=self._frame, focus='down')
-            elif listened_text['RU'] == st.COMMANDS_MEANING['focus_left']:
-                self.change_focus(container=self._frame, focus='left')
-            elif listened_text['RU'] == st.COMMANDS_MEANING['focus_right']:
-                self.change_focus(container=self._frame, focus='right')
-            elif listened_text['RU'] == st.COMMANDS_MEANING['change_lang']:
-                st.LANGUAGE = 'RU' if st.LANGUAGE == 'EN' else 'EN'
-            elif listened_text['RU'] == st.COMMANDS_MEANING['invoke']:
+        if listened_text['RU'] == st.COMMANDS_MEANING['focus_up']:
+            self.change_focus(container=self._frame, focus='up')
+        elif listened_text['RU'] == st.COMMANDS_MEANING['focus_down']:
+            self.change_focus(container=self._frame, focus='down')
+        elif listened_text['RU'] == st.COMMANDS_MEANING['focus_left']:
+            self.change_focus(container=self._frame, focus='left')
+        elif listened_text['RU'] == st.COMMANDS_MEANING['focus_right']:
+            self.change_focus(container=self._frame, focus='right')
+        elif listened_text['RU'] == st.COMMANDS_MEANING['change_lang']:
+            st.LANGUAGE = 'RU' if st.LANGUAGE == 'EN' else 'EN'
+        elif listened_text['RU'] == st.COMMANDS_MEANING['invoke']:
+            obj = self.focus_get()
+            if obj.winfo_class() == 'TButton':
+                obj.invoke()
+        elif listened_text['RU'] == st.COMMANDS_MEANING['delete_entry']:
+            if hasattr(self._frame, 'keyboard') and self._frame.keyboard.keyboard_isactive.get():
+                obj = self._frame.focused_entry
+            else:
                 obj = self.focus_get()
-                if obj.winfo_class() == 'TButton':
-                    obj.invoke()
-            elif listened_text['RU'] == st.COMMANDS_MEANING['delete_entry']:
-                if hasattr(self._frame, 'keyboard') and self._frame.keyboard.keyboard_isactive.get():
-                    obj = self._frame.focused_entry
-                else:
-                    obj = self.focus_get()
+            if obj.winfo_class() == 'TEntry':
+                obj.delete(0, tk.END)
+        # use [:-1] because vosk hear the word 'слово' like 'слова'
+        elif listened_text['RU'][:-1] == st.COMMANDS_MEANING['delete_word'][:-1]:
+            if hasattr(self._frame, 'keyboard') and self._frame.keyboard.keyboard_isactive.get():
+                obj = self._frame.focused_entry
+            else:
+                obj = self.focus_get()
+            if obj.winfo_class() == 'TEntry':
+                text = ' '.join(obj.get().split()[:-1])
+                obj.delete(0, tk.END)
+                obj.insert(0, text)
+        elif listened_text['RU'] == st.COMMANDS_MEANING['delete_symbol']:
+            if hasattr(self._frame, 'keyboard') and self._frame.keyboard.keyboard_isactive.get():
+                obj = self._frame.focused_entry
+            else:
+                obj = self.focus_get()
+            if obj.winfo_class() == 'TEntry':
+                obj.delete(len(obj.get())-1)
+        elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_on']:
+            self.commands['keyboard_on'] = False
+            self.commands['keyboard_off'] = True
+            self.commands['focus_left'] = True
+            self.commands['focus_right'] = True
+            self._frame.keyboard.keyboard_isactive.set(True)
+        elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_off']:
+            self.commands['keyboard_on'] = True
+            self.commands['keyboard_off'] = False
+            self.commands['focus_left'] = False
+            self.commands['focus_right'] = False
+            self._frame.keyboard.keyboard_isactive.set(False)
+        # input in entries
+        else:
+            if hasattr(self._frame, 'keyboard') and not self._frame.keyboard.keyboard_isactive.get():
+                obj = self.focus_get()
                 if obj.winfo_class() == 'TEntry':
-                    obj.delete(0, tk.END)
-            elif listened_text['RU'] == st.COMMANDS_MEANING['delete_word']:
-                if hasattr(self._frame, 'keyboard') and self._frame.keyboard.keyboard_isactive.get():
-                    obj = self._frame.focused_entry
-                else:
-                    obj = self.focus_get()
-                if obj.winfo_class() == 'TEntry':
-                    text = ' '.join(obj.get().split()[:-1])
-                    obj.delete(0, tk.END)
-                    obj.insert(0, text)
-            elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_on']:
-                self.commands['keyboard_on'] = False
-                self.commands['keyboard_off'] = True
-                self.commands['focus_left'] = True
-                self.commands['focus_right'] = True
-                self._frame.keyboard.keyboard_isactive.set(True)
-            elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_off']:
-                self.commands['keyboard_on'] = True
-                self.commands['keyboard_off'] = False
-                self.commands['focus_left'] = False
-                self.commands['focus_right'] = False
-                self._frame.keyboard.keyboard_isactive.set(False)
-
+                    obj.insert(tk.END, listened_text[st.LANGUAGE])
         # updating labels
         self.tkvars['commands'].set(self.get_command_words())
         self.tkvars['language'].set(st.LANGUAGE)
@@ -251,8 +263,8 @@ class ConnectMenu(tk.Frame):
             self.keyboard.show_keyboard()
 
             self.root.geometry(f'{self.window_width}x'
-                                      f'{self.window_height + self.keyboard.winfo_height()}+'
-                                      f'{self.center_x}+{self.center_y}')
+                               f'{self.window_height + self.keyboard.winfo_height()}+'
+                               f'{self.center_x}+{self.center_y}')
 
         else:
             for widget in self.winfo_children():
@@ -260,7 +272,7 @@ class ConnectMenu(tk.Frame):
                     widget['state'] = 'enabled'
             self.keyboard.hide_keyboard()
             self.root.geometry(f'{self.window_width}x{self.window_height}+'
-                          f'{self.center_x}+{self.center_y}')
+                               f'{self.center_x}+{self.center_y}')
 
 
 class ConnectionWindow(tk.Frame):
