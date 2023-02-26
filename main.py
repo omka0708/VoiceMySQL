@@ -19,7 +19,7 @@ class App(tk.Tk):
         self.commands = {
             'focus_up': True, 'focus_down': True, 'focus_left': False, 'focus_right': False, 'change_lang': True,
             'invoke': True, 'delete_symbol': True, 'delete_word': True, 'delete_entry': True, 'keyboard_on': True,
-            'keyboard_off': False,
+            'keyboard_off': False, 'space': True, 'shift': False, 'capslock': False, 'connect': True
         }
         self.resizable(False, False)
 
@@ -67,6 +67,7 @@ class App(tk.Tk):
                     self.handler(answer)
 
     def handler(self, listened_text):
+        # some if-statements use [:-1] because sometimes vosk hears the end of the word incorrectly
         if listened_text['RU'] == st.COMMANDS_MEANING['focus_up']:
             self.change_focus(container=self._frame, focus='up')
         elif listened_text['RU'] == st.COMMANDS_MEANING['focus_down']:
@@ -88,7 +89,6 @@ class App(tk.Tk):
                 obj = self.focus_get()
             if obj.winfo_class() == 'TEntry':
                 obj.delete(0, tk.END)
-        # use [:-1] because vosk hear the word 'слово' like 'слова'
         elif listened_text['RU'][:-1] == st.COMMANDS_MEANING['delete_word'][:-1]:
             if hasattr(self._frame, 'keyboard') and self._frame.keyboard.keyboard_isactive.get():
                 obj = self._frame.focused_entry
@@ -105,23 +105,41 @@ class App(tk.Tk):
                 obj = self.focus_get()
             if obj.winfo_class() == 'TEntry':
                 obj.delete(len(obj.get())-1)
-        elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_on']:
+        elif hasattr(self._frame, 'keyboard') and listened_text['RU'][:-1] == st.COMMANDS_MEANING['keyboard_on'][:-1]:
             self.commands['keyboard_on'] = False
             self.commands['keyboard_off'] = True
             self.commands['focus_left'] = True
             self.commands['focus_right'] = True
+            self.commands['shift'] = True
+            self.commands['capslock'] = True
             self._frame.keyboard.keyboard_isactive.set(True)
-        elif hasattr(self._frame, 'keyboard') and listened_text['RU'] == st.COMMANDS_MEANING['keyboard_off']:
+        elif hasattr(self._frame, 'keyboard') and listened_text['RU'][:-1] == st.COMMANDS_MEANING['keyboard_off'][:-1]:
             self.commands['keyboard_on'] = True
             self.commands['keyboard_off'] = False
             self.commands['focus_left'] = False
             self.commands['focus_right'] = False
+            self.commands['shift'] = False
+            self.commands['capslock'] = False
             self._frame.keyboard.keyboard_isactive.set(False)
+        elif listened_text['RU'] == st.COMMANDS_MEANING['space']:
+            if hasattr(self._frame, 'keyboard') and self._frame.keyboard.keyboard_isactive.get():
+                obj = self._frame.focused_entry
+            else:
+                obj = self.focus_get()
+            if obj.winfo_class() == 'TEntry':
+                obj.insert(tk.END, ' ')
+        elif hasattr(self._frame, 'keyboard') and listened_text['EN'] == st.COMMANDS_MEANING['shift']:
+            self._frame.keyboard.on_shift(not self._frame.keyboard.shift)
+        elif hasattr(self._frame, 'keyboard') and listened_text['EN'] == st.COMMANDS_MEANING['capslock']:
+            self._frame.keyboard.on_capslock(not self._frame.keyboard.capslock)
+        elif listened_text['EN'] == st.COMMANDS_MEANING['connect']:
+            self._frame.connect()
+
         # input in entries
         else:
             if hasattr(self._frame, 'keyboard') and not self._frame.keyboard.keyboard_isactive.get():
                 obj = self.focus_get()
-                if obj.winfo_class() == 'TEntry':
+                if obj.winfo_class() == 'TEntry' and not (st.LANGUAGE == 'EN' and listened_text['EN'] == 'huh'):
                     obj.insert(tk.END, listened_text[st.LANGUAGE])
         # updating labels
         self.tkvars['commands'].set(self.get_command_words())
@@ -176,7 +194,7 @@ class ConnectMenu(tk.Frame):
         root.title("VoiceMySQL")
 
         self.window_width = 500
-        self.window_height = 250
+        self.window_height = 300
         self.screen_width = root.winfo_screenwidth()
         self.screen_height = root.winfo_screenheight()
 
@@ -196,7 +214,7 @@ class ConnectMenu(tk.Frame):
         self.img = ImageTk.PhotoImage(Image.open("micro.png"))
 
         label_mic = ttk.Label(self, image=self.img)
-        label_mic.grid(row=0, column=0)
+        label_mic.grid(row=0, column=0, pady=10, padx=10)
 
         label_listening = ttk.Label(self, textvariable=root.tkvars['listen'], borderwidth=2, relief='groove', padding=5,
                                     width=20, anchor=tk.CENTER, background='white')
@@ -206,11 +224,10 @@ class ConnectMenu(tk.Frame):
         label_txt_commands.grid(row=0, column=2)
 
         label_commands = ttk.Label(self, textvariable=root.tkvars['commands'], borderwidth=2, relief='groove',
-                                   padding=5,
                                    width=20, background='white', foreground='red',
                                    justify=tk.CENTER, anchor=tk.CENTER)
 
-        label_commands.grid(row=1, column=2, rowspan=4, sticky='ns', padx=10)
+        label_commands.grid(row=1, column=2, rowspan=4, sticky='nswe', padx=10)
 
         label_host = ttk.Label(self, text='host:')
         label_host.grid(row=1, column=0)
@@ -234,7 +251,7 @@ class ConnectMenu(tk.Frame):
         entry_password.grid(row=4, column=1)
 
         button_connect = ttk.Button(self, text='Connect', command=self.connect)
-        button_connect.grid(row=5, column=0, columnspan=2)
+        button_connect.grid(row=5, column=0, columnspan=2, pady=10)
 
         label_listening_lang = ttk.Label(self, textvariable=root.tkvars['language'], text=st.LANGUAGE)
         label_listening_lang.grid(row=5, column=2)
