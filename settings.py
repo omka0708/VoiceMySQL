@@ -1,6 +1,10 @@
-SECTION = "ConnectMenu"
 LIMIT_ROWS = 1000
 LANGUAGE = 'RU'
+
+HOST = ''
+USER = ''
+PORT = ''
+PASSWORD = ''
 
 COMMANDS_MEANING = {
     'focus_up': 'выше', 'focus_down': 'ниже', 'focus_left': 'лево', 'focus_right': 'право',

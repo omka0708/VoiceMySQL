@@ -1,9 +1,13 @@
 import sys
+import time
 import tkinter as tk
 from tkinter import ttk
+import tkinter.messagebox as mb
 from PIL import ImageTk, Image
 import pymysql
 import json, pyaudio
+
+from pymysql import OperationalError
 from vosk import Model, KaldiRecognizer
 from threading import Thread
 from keyboard import Keyboard
@@ -26,7 +30,9 @@ class App(tk.Tk):
         self.tkvars = {
             'listen': tk.StringVar(),
             'commands': tk.StringVar(value=self.get_command_words()),
-            'language': tk.StringVar(value=st.LANGUAGE)}
+            'language': tk.StringVar(value=st.LANGUAGE),
+            'use_db': tk.StringVar(value='no db!'),
+            'affected_rows': tk.IntVar(value=0)}
 
         model_en, model_ru = Model('small_model_en_us'), Model('small_model_ru')
         rec_en, rec_ru = KaldiRecognizer(model_en, 16000), KaldiRecognizer(model_ru, 16000)
@@ -37,10 +43,12 @@ class App(tk.Tk):
         self.listening_thread = Thread(target=self.listen, args=(stream, rec_en, rec_ru))
         self.listening_thread.start()
 
+        self.connection = None
+
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self._frame = None
-        self.switch_frame(ConnectMenu)
+        self.switch_frame(MainWindow)
 
     def get_command_words(self):
         return '\n'.join(st.COMMANDS_MEANING[command] for command, boolean in self.commands.items() if boolean)
@@ -104,7 +112,7 @@ class App(tk.Tk):
             else:
                 obj = self.focus_get()
             if obj.winfo_class() == 'TEntry':
-                obj.delete(len(obj.get())-1)
+                obj.delete(len(obj.get()) - 1)
         elif hasattr(self._frame, 'keyboard') and listened_text['RU'][:-1] == st.COMMANDS_MEANING['keyboard_on'][:-1]:
             self.commands['keyboard_on'] = False
             self.commands['keyboard_off'] = True
@@ -139,7 +147,7 @@ class App(tk.Tk):
         else:
             if hasattr(self._frame, 'keyboard') and not self._frame.keyboard.keyboard_isactive.get():
                 obj = self.focus_get()
-                if obj.winfo_class() == 'TEntry' and not (st.LANGUAGE == 'EN' and listened_text['EN'] == 'huh'):
+                if obj and obj.winfo_class() == 'TEntry' and not (st.LANGUAGE == 'EN' and listened_text['EN'] == 'huh'):
                     obj.insert(tk.END, listened_text[st.LANGUAGE])
         # updating labels
         self.tkvars['commands'].set(self.get_command_words())
@@ -231,29 +239,29 @@ class ConnectMenu(tk.Frame):
 
         label_host = ttk.Label(self, text='host:')
         label_host.grid(row=1, column=0)
-        entry_host = ttk.Entry(self)
-        entry_host.grid(row=1, column=1)
-        entry_host.focus_set()
+        self.entry_host = ttk.Entry(self)
+        self.entry_host.grid(row=1, column=1)
+        self.entry_host.focus_set()
 
         label_user = ttk.Label(self, text='user:')
         label_user.grid(row=2, column=0)
-        entry_user = ttk.Entry(self)
-        entry_user.grid(row=2, column=1)
+        self.entry_user = ttk.Entry(self)
+        self.entry_user.grid(row=2, column=1)
 
         label_port = ttk.Label(self, text='port:')
         label_port.grid(row=3, column=0)
-        entry_port = ttk.Entry(self)
-        entry_port.grid(row=3, column=1)
+        self.entry_port = ttk.Entry(self)
+        self.entry_port.grid(row=3, column=1)
 
         label_password = ttk.Label(self, text='password:')
         label_password.grid(row=4, column=0, ipadx=10)
-        entry_password = ttk.Entry(self)
-        entry_password.grid(row=4, column=1)
+        self.entry_password = ttk.Entry(self)
+        self.entry_password.grid(row=4, column=1)
 
         button_connect = ttk.Button(self, text='Connect', command=self.connect)
         button_connect.grid(row=5, column=0, columnspan=2, pady=10)
 
-        label_listening_lang = ttk.Label(self, textvariable=root.tkvars['language'], text=st.LANGUAGE)
+        label_listening_lang = ttk.Label(self, textvariable=root.tkvars['language'])
         label_listening_lang.grid(row=5, column=2)
 
         root.bind("<Return>", lambda e: self.connect())
@@ -261,10 +269,14 @@ class ConnectMenu(tk.Frame):
         root.bind("<Down>", lambda e: root.change_focus(self, 'down'))
         root.bind("<Left>", lambda e: root.change_focus(self, 'left'))
         root.bind("<Right>", lambda e: root.change_focus(self, 'right'))
+        root.bind('<Control-a>', lambda x: root.selection_range(0, 'end') or "break")
 
     def connect(self):
-        # self.root.switch_frame(ConnectionWindow)
-        self.keyboard.keyboard_isactive.set(not self.keyboard.keyboard_isactive.get())
+        st.HOST = self.entry_host.get()
+        st.USER = self.entry_user.get()
+        st.PORT = self.entry_port.get()
+        st.PASSWORD = self.entry_password.get()
+        self.root.switch_frame(ConnectionWindow)
 
     def on_keyboard(self):
         if self.keyboard.keyboard_isactive.get():
@@ -301,7 +313,7 @@ class ConnectionWindow(tk.Frame):
         root.resizable(False, False)
 
         window_width = 250
-        window_height = 250
+        window_height = 150
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
 
@@ -309,6 +321,111 @@ class ConnectionWindow(tk.Frame):
         center_y = int(screen_height / 2 - window_height / 2 - 50)
 
         root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
+
+        self.columnconfigure(index=0, weight=1)
+        self.rowconfigure(index=0, weight=1)
+
+        label_host = ttk.Label(self, text='Connecting...', anchor=tk.CENTER, justify=tk.CENTER, font=14)
+        label_host.grid(row=0, column=0, sticky='we')
+
+        self.connecting_thread = Thread(target=self.connect_to_database)
+        self.connecting_thread.start()
+
+    def connect_to_database(self):
+        try:
+            self.root.connection = pymysql.connect(
+                host=st.HOST, user=st.USER, password=st.PASSWORD, database=None, port=int(st.PORT),
+                cursorclass=pymysql.cursors.DictCursor
+            )
+            self.root.switch_frame(MainWindow)
+        except (OperationalError, ValueError) as e:
+            mb.showerror("Ошибка", e)
+            self.root.switch_frame(ConnectMenu)
+
+
+class MainWindow(tk.Frame):
+    def __init__(self, root):
+        tk.Frame.__init__(self, root)
+        self.root = root
+
+        root.title("VoiceMySQL")
+        root.resizable(False, False)
+
+        self.window_width = 750
+        self.window_height = 600
+        self.screen_width = root.winfo_screenwidth()
+        self.screen_height = root.winfo_screenheight()
+
+        self.center_x = int(self.screen_width / 2 - self.window_width / 2)
+        self.center_y = int(self.screen_height / 2 - self.window_height / 2 - 100)
+
+        root.geometry(f'{self.window_width}x{self.window_height}+{self.center_x}+{self.center_y}')
+
+        self.focused_entry = None
+        self.keyboard = Keyboard(self)
+
+        for c in range(5):
+            self.columnconfigure(index=c, weight=1)
+        for r in range(7):
+            self.rowconfigure(index=r, weight=1)
+
+        label_listening = ttk.Label(self, textvariable=root.tkvars['listen'], borderwidth=2, relief='groove', padding=5,
+                                    width=70, anchor=tk.CENTER, background='white')
+        label_listening.grid(row=0, column=0, sticky='we', padx=20)
+
+        self.img_microphone = ImageTk.PhotoImage(Image.open("micro.png"))
+
+        label_mic = ttk.Label(self, image=self.img_microphone)
+        label_mic.grid(row=0, column=1, pady=10, padx=10)
+
+        label_commands = ttk.Label(self, textvariable=root.tkvars['commands'], borderwidth=2, relief='groove',
+                                   width=20, background='white', foreground='red',
+                                   justify=tk.CENTER, anchor=tk.CENTER)
+
+        label_commands.grid(row=0, column=2, rowspan=4, sticky='nswe', padx=20, pady=20)
+
+        sql_text = tk.Text(self, width=0, height=0, borderwidth=2, relief=tk.RIDGE)
+        sql_text.grid(row=1, column=0, rowspan=3, sticky='nswe', padx=20, pady=20)
+        self.focused_entry = sql_text
+
+        label_db = ttk.Label(self, textvariable=root.tkvars['use_db'])
+        label_db.grid(row=1, column=1)
+
+        label_listening_lang = ttk.Label(self, textvariable=root.tkvars['language'])
+        label_listening_lang.grid(row=2, column=1)
+
+        self.img_execution = ImageTk.PhotoImage(Image.open("execute.png"))
+        button_execute = ttk.Button(self, image=self.img_execution)
+        button_execute.grid(row=3, column=1)
+
+        result_text = tk.Text(self, width=0, height=0, borderwidth=2, state=tk.DISABLED)
+        result_text.grid(row=4, column=0, rowspan=4, sticky='nswe', padx=20, pady=20)
+
+        label_affected_rows_text = ttk.Label(self, text='Количество использованных строк:')
+        label_affected_rows_text.grid(row=4, column=2)
+
+        label_affected_rows = ttk.Label(self, textvariable=root.tkvars['affected_rows'], foreground='red')
+        label_affected_rows.grid(row=5, column=2)
+
+        button_disconnect = ttk.Button(self, text='Disconnect', command=self.disconnect)
+        button_disconnect.grid(row=6, column=2)
+
+    def disconnect(self):
+        self.keyboard.keyboard_isactive.set(not self.keyboard.keyboard_isactive.get())
+
+    def on_keyboard(self):
+        if self.keyboard.keyboard_isactive.get():
+            self.keyboard.show_keyboard()
+            self.root.geometry(f'{self.window_width}x'
+                               f'{self.window_height + self.keyboard.winfo_height()}+'
+                               f'{self.center_x}+{self.center_y}')
+        else:
+            for widget in self.winfo_children():
+                if widget.winfo_class() == 'TEntry':
+                    widget['state'] = 'enabled'
+            self.keyboard.hide_keyboard()
+            self.root.geometry(f'{self.window_width}x{self.window_height}+'
+                               f'{self.center_x}+{self.center_y}')
 
 
 if __name__ == "__main__":
