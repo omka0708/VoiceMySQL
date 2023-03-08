@@ -7,7 +7,7 @@ from PIL import ImageTk, Image
 import pymysql
 import json, pyaudio
 
-from pymysql import OperationalError
+from pymysql import DatabaseError
 from vosk import Model, KaldiRecognizer
 from threading import Thread
 from keyboard import Keyboard
@@ -32,7 +32,8 @@ class App(tk.Tk):
             'commands': tk.StringVar(value=self.get_command_words()),
             'language': tk.StringVar(value=st.LANGUAGE),
             'use_db': tk.StringVar(value='no db!'),
-            'affected_rows': tk.IntVar(value=0)}
+            'affected_rows': tk.IntVar(value=0),
+            'sql_result': tk.StringVar(value='Количество использованных строк:')}
 
         model_en, model_ru = Model('small_model_en_us'), Model('small_model_ru')
         rec_en, rec_ru = KaldiRecognizer(model_en, 16000), KaldiRecognizer(model_ru, 16000)
@@ -48,7 +49,7 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self._frame = None
-        self.switch_frame(MainWindow)
+        self.switch_frame(ConnectMenu)
 
     def get_command_words(self):
         return '\n'.join(st.COMMANDS_MEANING[command] for command, boolean in self.commands.items() if boolean)
@@ -269,7 +270,12 @@ class ConnectMenu(tk.Frame):
         root.bind("<Down>", lambda e: root.change_focus(self, 'down'))
         root.bind("<Left>", lambda e: root.change_focus(self, 'left'))
         root.bind("<Right>", lambda e: root.change_focus(self, 'right'))
-        root.bind('<Control-a>', lambda x: root.selection_range(0, 'end') or "break")
+        root.bind('<Control-a>', lambda x: root.focus_get().selection_range(0, 'end') or "break")
+
+        self.entry_host.insert(0, 'localhost')
+        self.entry_user.insert(0, 'root')
+        self.entry_port.insert(0, '3306')
+        self.entry_password.insert(0, 'omka2061')
 
     def connect(self):
         st.HOST = self.entry_host.get()
@@ -338,7 +344,7 @@ class ConnectionWindow(tk.Frame):
                 cursorclass=pymysql.cursors.DictCursor
             )
             self.root.switch_frame(MainWindow)
-        except (OperationalError, ValueError) as e:
+        except (DatabaseError, ValueError) as e:
             mb.showerror("Ошибка", e)
             self.root.switch_frame(ConnectMenu)
 
@@ -351,7 +357,7 @@ class MainWindow(tk.Frame):
         root.title("VoiceMySQL")
         root.resizable(False, False)
 
-        self.window_width = 750
+        self.window_width = 800
         self.window_height = 600
         self.screen_width = root.winfo_screenwidth()
         self.screen_height = root.winfo_screenheight()
@@ -364,7 +370,7 @@ class MainWindow(tk.Frame):
         self.focused_entry = None
         self.keyboard = Keyboard(self)
 
-        for c in range(5):
+        for c in range(3):
             self.columnconfigure(index=c, weight=1)
         for r in range(7):
             self.rowconfigure(index=r, weight=1)
@@ -379,7 +385,7 @@ class MainWindow(tk.Frame):
         label_mic.grid(row=0, column=1, pady=10, padx=10)
 
         label_commands = ttk.Label(self, textvariable=root.tkvars['commands'], borderwidth=2, relief='groove',
-                                   width=20, background='white', foreground='red',
+                                   width=35, background='white', foreground='red',
                                    justify=tk.CENTER, anchor=tk.CENTER)
 
         label_commands.grid(row=0, column=2, rowspan=4, sticky='nswe', padx=20, pady=20)
@@ -387,6 +393,7 @@ class MainWindow(tk.Frame):
         sql_text = tk.Text(self, width=0, height=0, borderwidth=2, relief=tk.RIDGE)
         sql_text.grid(row=1, column=0, rowspan=3, sticky='nswe', padx=20, pady=20)
         self.focused_entry = sql_text
+        self.focused_entry.focus_set()
 
         label_db = ttk.Label(self, textvariable=root.tkvars['use_db'])
         label_db.grid(row=1, column=1)
@@ -395,20 +402,59 @@ class MainWindow(tk.Frame):
         label_listening_lang.grid(row=2, column=1)
 
         self.img_execution = ImageTk.PhotoImage(Image.open("execute.png"))
-        button_execute = ttk.Button(self, image=self.img_execution)
+        button_execute = ttk.Button(self, image=self.img_execution, command=self.execute)
         button_execute.grid(row=3, column=1)
 
-        result_text = tk.Text(self, width=0, height=0, borderwidth=2, state=tk.DISABLED)
-        result_text.grid(row=4, column=0, rowspan=4, sticky='nswe', padx=20, pady=20)
+        result_frame = ttk.Frame(self)
+        result_frame.grid(row=4, column=0, columnspan=2, rowspan=4, sticky='nsew', padx=20, pady=20)
 
-        label_affected_rows_text = ttk.Label(self, text='Количество использованных строк:')
-        label_affected_rows_text.grid(row=4, column=2)
+        scroll_x = ttk.Scrollbar(result_frame, orient=tk.HORIZONTAL)
+        scroll_x.place(relx=0.0, rely=0.0, relwidth=0.9)
+        scroll_y = ttk.Scrollbar(result_frame)
+        scroll_y.place(relx=0.9, rely=0.1, relheight=0.9)
+        self.result_table = ttk.Treeview(result_frame,
+                                         show='headings')
+        self.result_table.place(relx=0.0, rely=0.1, relwidth=0.9)
+        scroll_y.config(command=self.result_table.yview)
+        scroll_x.config(command=self.result_table.xview)
+
+        label_sql_query_info = ttk.Label(self, textvariable=root.tkvars['sql_result'], wraplength=200,
+                                         justify=tk.CENTER, anchor=tk.CENTER, width=35)
+        label_sql_query_info.grid(row=4, column=2)
 
         label_affected_rows = ttk.Label(self, textvariable=root.tkvars['affected_rows'], foreground='red')
         label_affected_rows.grid(row=5, column=2)
 
         button_disconnect = ttk.Button(self, text='Disconnect', command=self.disconnect)
         button_disconnect.grid(row=6, column=2)
+
+    def execute(self):
+        request = self.focused_entry.get('1.0', tk.END)
+        affected_rows = 0
+        self.result_table.delete(*self.result_table.get_children())
+        try:
+            with self.root.connection.cursor() as cursor:
+                affected_rows = cursor.execute(request)
+                self.root.connection.commit()
+                rows = cursor.fetchmany(st.LIMIT_ROWS)
+                if rows:
+                    self.result_table['columns'] = tuple(rows[0].keys())
+                    for title in rows[0].keys():
+                        self.result_table.column(title, anchor=tk.CENTER)
+                        self.result_table.heading(title, text=title, anchor=tk.CENTER)
+
+                    for row in rows:
+                        self.result_table.insert(parent='', index='end', values=tuple(row.values()))
+
+                cursor.execute('SELECT DATABASE()')
+                used_db = cursor.fetchone()['DATABASE()']
+
+                self.root.tkvars['use_db'].set(used_db)
+                self.root.tkvars['sql_result'].set('Количество использованных строк:')
+        except DatabaseError as e:
+            self.root.tkvars['sql_result'].set(e)
+        finally:
+            self.root.tkvars['affected_rows'].set(affected_rows)
 
     def disconnect(self):
         self.keyboard.keyboard_isactive.set(not self.keyboard.keyboard_isactive.get())
