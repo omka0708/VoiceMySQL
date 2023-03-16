@@ -46,6 +46,7 @@ class App(tk.Tk):
         self.listening_thread.start()
 
         self.connection = None
+        self.tableFont = tkFont.Font(self)
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -191,6 +192,22 @@ class App(tk.Tk):
             self.set_focus(container, (0, dy, -dy), (-dx, -dx, -dx))
         elif focus == 'right':
             self.set_focus(container, (0, dy, -dy), (dx, dx, dx))
+
+    def fill_treeview(self, treeview):
+        if st.RESULT_ROWS:
+            treeview['columns'] = tuple(st.RESULT_ROWS[0].keys())
+            for title in st.RESULT_ROWS[0].keys():
+
+                longest_item = ''
+                for row in st.RESULT_ROWS:
+                    if len(str(row[title])) > len(longest_item):
+                        longest_item = str(row[title])
+                w = self.tableFont.measure(longest_item)
+                treeview.column(title, anchor=tk.CENTER, width=w, minwidth=20)
+                treeview.heading(title, text=title, anchor=tk.CENTER)
+
+            for row in st.RESULT_ROWS:
+                treeview.insert(parent='', index='end', values=tuple(row.values()))
 
     def on_closing(self):
         self.closing = True
@@ -418,6 +435,8 @@ class MainWindow(tk.Frame):
         scroll_y.config(command=self.result_table.yview)
         scroll_x.config(command=self.result_table.xview)
 
+        root.fill_treeview(treeview=self.result_table)
+
         label_sql_query_info = ttk.Label(self, textvariable=root.tkvars['sql_result'], wraplength=200,
                                          justify=tk.CENTER, anchor=tk.CENTER, width=35)
         label_sql_query_info.grid(row=4, column=2)
@@ -436,19 +455,9 @@ class MainWindow(tk.Frame):
             with self.root.connection.cursor() as cursor:
                 affected_rows = cursor.execute(request)
                 self.root.connection.commit()
-                rows = cursor.fetchmany(st.LIMIT_ROWS)
-                if rows:
-                    self.result_table['columns'] = tuple(rows[0].keys())
-                    for title in rows[0].keys():
-                        longest_item = ''
-                        for row in rows:
-                            if len(str(row[title])) > len(longest_item):
-                                longest_item = str(row[title])
-                        self.result_table.column(title, anchor=tk.CENTER, width=self.tableFont.measure(longest_item))
-                        self.result_table.heading(title, text=title, anchor=tk.CENTER)
+                st.RESULT_ROWS = cursor.fetchmany(st.LIMIT_ROWS)
 
-                    for row in rows:
-                        self.result_table.insert(parent='', index='end', values=tuple(row.values()))
+                self.root.fill_treeview(treeview=self.result_table)
 
                 cursor.execute('SELECT DATABASE()')
                 used_db = cursor.fetchone()['DATABASE()']
@@ -461,7 +470,7 @@ class MainWindow(tk.Frame):
             self.root.tkvars['affected_rows'].set(affected_rows)
 
     def disconnect(self):
-        self.keyboard.keyboard_isactive.set(not self.keyboard.keyboard_isactive.get())
+        self.root.switch_frame(TableWidescreen)
 
     def on_keyboard(self):
         if self.keyboard.keyboard_isactive.get():
@@ -476,6 +485,40 @@ class MainWindow(tk.Frame):
             self.keyboard.hide_keyboard()
             self.root.geometry(f'{self.window_width}x{self.window_height}+'
                                f'{self.center_x}+{self.center_y}')
+
+
+class TableWidescreen(tk.Frame):
+    def __init__(self, root):
+        tk.Frame.__init__(self, root)
+        self.root = root
+
+        root.title("VoiceMySQL")
+        root.resizable(False, False)
+
+        self.window_width = 1300
+        self.window_height = 600
+        self.screen_width = root.winfo_screenwidth()
+        self.screen_height = root.winfo_screenheight()
+
+        self.center_x = int(self.screen_width / 2 - self.window_width / 2)
+        self.center_y = int(self.screen_height / 2 - self.window_height / 2 - 50)
+
+        root.geometry(f'{self.window_width}x{self.window_height}+{self.center_x}+{self.center_y}')
+
+        self.columnconfigure(index=0, weight=1)
+        self.rowconfigure(index=0, weight=1)
+
+        result_frame = ttk.Frame(self)
+        result_frame.grid(sticky='nsew', padx=20, pady=20)
+
+        self.result_table = ttk.Treeview(result_frame, show='headings')
+        self.result_table.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
+
+        root.fill_treeview(treeview=self.result_table)
+
+        btn = ttk.Button(self, text='OK', command=lambda: self.root.switch_frame(MainWindow))
+        btn.grid(padx=20, pady=20)
+        btn.focus_set()
 
 
 if __name__ == "__main__":
