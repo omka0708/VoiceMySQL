@@ -3,6 +3,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 import tkinter.messagebox as mb
+import tkinter.font as tkFont
 from PIL import ImageTk, Image
 import pymysql
 import json, pyaudio
@@ -265,7 +266,6 @@ class ConnectMenu(tk.Frame):
         label_listening_lang = ttk.Label(self, textvariable=root.tkvars['language'])
         label_listening_lang.grid(row=5, column=2)
 
-        root.bind("<Return>", lambda e: self.connect())
         root.bind("<Up>", lambda e: root.change_focus(self, 'up'))
         root.bind("<Down>", lambda e: root.change_focus(self, 'down'))
         root.bind("<Left>", lambda e: root.change_focus(self, 'left'))
@@ -412,9 +412,9 @@ class MainWindow(tk.Frame):
         scroll_x.place(relx=0.0, rely=0.0, relwidth=0.9)
         scroll_y = ttk.Scrollbar(result_frame)
         scroll_y.place(relx=0.9, rely=0.1, relheight=0.9)
-        self.result_table = ttk.Treeview(result_frame,
-                                         show='headings')
-        self.result_table.place(relx=0.0, rely=0.1, relwidth=0.9)
+        self.result_table = ttk.Treeview(result_frame, show='headings')
+        self.result_table.place(relx=0.0, rely=0.1, relwidth=0.9, relheight=0.95)
+        self.tableFont = tkFont.Font(self)
         scroll_y.config(command=self.result_table.yview)
         scroll_x.config(command=self.result_table.xview)
 
@@ -440,7 +440,11 @@ class MainWindow(tk.Frame):
                 if rows:
                     self.result_table['columns'] = tuple(rows[0].keys())
                     for title in rows[0].keys():
-                        self.result_table.column(title, anchor=tk.CENTER)
+                        longest_item = ''
+                        for row in rows:
+                            if len(str(row[title])) > len(longest_item):
+                                longest_item = str(row[title])
+                        self.result_table.column(title, anchor=tk.CENTER, width=self.tableFont.measure(longest_item))
                         self.result_table.heading(title, text=title, anchor=tk.CENTER)
 
                     for row in rows:
